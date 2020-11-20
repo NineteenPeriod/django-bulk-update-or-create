@@ -1,3 +1,5 @@
+from functools import partial, reduce
+
 from django.db import models
 
 
@@ -44,7 +46,7 @@ class BulkUpdateOrCreateMixin:
 
         :param objs: model instances to be updated or created
         :param update_fields: fields that will be updated if record already exists (passed on to bulk_update)
-        :param match_field: model field that will match existing records (defaults to "pk")
+        :param match_field: model fields that will match existing records (defaults to ["pk"])
         :param batch_size: number of records to process in each batch (defaults to len(objs))
         :param case_insensitive_match: set to True if using MySQL with "ci" collations (defaults to False)
         :param yield_objects: if True, method becomes a generator that will yield a tuple of lists with ([created], [updated]) objects
@@ -81,11 +83,13 @@ class BulkUpdateOrCreateMixin:
         if batch_size is None:
             batch_size = len(objs)
 
+        match_field = (match_field,) if isinstance(match_field, str) else match_field
+
         # validate that all objects have the required fields
         for obj in objs:
-            if not hasattr(obj, match_field):
+            if not all(map(partial(hasattr, obj), match_field)):
                 raise ValueError(
-                    f'some object does not have the match_field {match_field}'
+                    f'some object does not have the match_field {", ".join(match_field)}'
                 )
             for _f in update_fields:
                 if not hasattr(obj, _f):
@@ -93,27 +97,40 @@ class BulkUpdateOrCreateMixin:
 
         batches = (objs[i : i + batch_size] for i in range(0, len(objs), batch_size))
 
+        def _obj_key_getter(obj):  # no-op
+            return tuple(map(
+                partial(getattr, obj),
+                match_field
+            ))
+
+        _obj_key_getter_sensitive = _obj_key_getter
+
         if case_insensitive_match:
+            def _obj_key_getter(obj):
+                return tuple(map(
+                    lambda v: v.lower() if hasattr(v, 'lower') else v,
+                    _obj_key_getter_sensitive(obj),
+                ))
 
-            def _cased_key(obj):
-                k = getattr(obj, match_field)
-                return k.lower() if hasattr(k, 'lower') else k
-
-        else:
-
-            def _cased_key(obj):  # no-op
-                return getattr(obj, match_field)
+        def _obj_filter(obj_map):
+            return reduce(
+                lambda acc_q, obj_key: acc_q | models.Q(**{
+                    k: obj_key[i] for i, k in enumerate(match_field)
+                }),
+                obj_map.keys(),
+                models.Q(),
+            )
 
         for batch in batches:
-            obj_map = {_cased_key(obj): obj for obj in batch}
+            obj_map = {_obj_key_getter(obj): obj for obj in batch}
 
             # mass select for bulk_update on existing ones
-            to_update = list(self.filter(**{match_field + '__in': obj_map.keys()}))
+            to_update = list(self.filter(_obj_filter(obj_map=obj_map)))
             for to_u in to_update:
-                obj = obj_map[_cased_key(to_u)]
+                obj = obj_map[_obj_key_getter(to_u)]
                 for _f in update_fields:
                     setattr(to_u, _f, getattr(obj, _f))
-                del obj_map[_cased_key(to_u)]
+                del obj_map[_obj_key_getter(to_u)]
             self.bulk_update(to_update, update_fields)
 
             # .create on the remaining (bulk_create won't work on multi-table inheritance models...)
