@@ -84,6 +84,7 @@ class BulkUpdateOrCreateMixin:
             batch_size = len(objs)
 
         match_field = (match_field,) if isinstance(match_field, str) else match_field
+        single_match_field = len(match_field) == 1
 
         # validate that all objects have the required fields
         for obj in objs:
@@ -95,10 +96,10 @@ class BulkUpdateOrCreateMixin:
                 if not hasattr(obj, _f):
                     raise ValueError(f'some object does not have the update_field {_f}')
 
-        batches = (objs[i : i + batch_size] for i in range(0, len(objs), batch_size))
+        batches = (objs[i: i + batch_size] for i in range(0, len(objs), batch_size))
 
         def _obj_key_getter(obj):  # no-op
-            return tuple(map(
+            return getattr(obj, match_field[0]) if single_match_field else tuple(map(
                 partial(getattr, obj),
                 match_field
             ))
@@ -106,13 +107,20 @@ class BulkUpdateOrCreateMixin:
         _obj_key_getter_sensitive = _obj_key_getter
 
         if case_insensitive_match:
+            lower = lambda v: v.lower() if hasattr(v, 'lower') else v
+
             def _obj_key_getter(obj):
-                return tuple(map(
-                    lambda v: v.lower() if hasattr(v, 'lower') else v,
+                return lower(getattr(obj, match_field[0])) if single_match_field else tuple(map(
+                    lower,
                     _obj_key_getter_sensitive(obj),
                 ))
 
         def _obj_filter(obj_map):
+            if single_match_field:
+                return models.Q(**{
+                    f'{match_field[0]}__in': obj_map.keys()
+                })
+
             return reduce(
                 lambda acc_q, obj_key: acc_q | models.Q(**{
                     k: obj_key[i] for i, k in enumerate(match_field)
@@ -125,7 +133,8 @@ class BulkUpdateOrCreateMixin:
             obj_map = {_obj_key_getter(obj): obj for obj in batch}
 
             # mass select for bulk_update on existing ones
-            to_update = list(self.filter(_obj_filter(obj_map=obj_map)))
+            to_update = self.filter(_obj_filter(obj_map=obj_map))
+
             for to_u in to_update:
                 obj = obj_map[_obj_key_getter(to_u)]
                 for _f in update_fields:
