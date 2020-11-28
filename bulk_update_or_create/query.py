@@ -5,12 +5,12 @@ from django.db import models
 
 class BulkUpdateOrCreateMixin:
     def bulk_update_or_create_context(
-        self,
-        update_fields,
-        match_field='pk',
-        batch_size=100,
-        case_insensitive_match=False,
-        status_cb=None,
+            self,
+            update_fields,
+            match_field='pk',
+            batch_size=100,
+            case_insensitive_match=False,
+            status_cb=None,
     ):
         """
         Helper method that returns a context manager (_BulkUpdateOrCreateContextManager) that makes it easier to handle
@@ -34,13 +34,13 @@ class BulkUpdateOrCreateMixin:
         )
 
     def bulk_update_or_create(
-        self,
-        objs,
-        update_fields,
-        match_field='pk',
-        batch_size=None,
-        case_insensitive_match=False,
-        yield_objects=False,
+            self,
+            objs,
+            update_fields,
+            match_field='pk',
+            batch_size=None,
+            case_insensitive_match=False,
+            yield_objects=False,
     ):
         """
 
@@ -65,13 +65,13 @@ class BulkUpdateOrCreateMixin:
         return list(r)
 
     def __bulk_update_or_create(
-        self,
-        objs,
-        update_fields,
-        match_field='pk',
-        batch_size=None,
-        case_insensitive_match=False,
-        yield_objects=False,
+            self,
+            objs,
+            update_fields,
+            match_field='pk',
+            batch_size=None,
+            case_insensitive_match=False,
+            yield_objects=False,
     ):
         if not objs:
             raise ValueError('no objects to update_or_create...')
@@ -121,12 +121,11 @@ class BulkUpdateOrCreateMixin:
                     f'{match_field[0]}__in': obj_map.keys()
                 })
 
-            return reduce(
-                lambda acc_q, obj_key: acc_q | models.Q(**{
+            return models.Q(
+                *(models.Q(**{
                     k: obj_key[i] for i, k in enumerate(match_field)
-                }),
-                obj_map.keys(),
-                models.Q(),
+                }) for obj_key in obj_map.keys()),
+                _connector=models.Q.OR
             )
 
         for batch in batches:
@@ -157,7 +156,7 @@ class BulkUpdateOrCreateQuerySet(BulkUpdateOrCreateMixin, models.QuerySet):
 
 class _BulkUpdateOrCreateContextManager:
     def __init__(
-        self, queryset, update_fields, batch_size=500, status_cb=None, **kwargs
+            self, queryset, update_fields, batch_size=500, status_cb=None, **kwargs
     ):
         self._queue = []
         self._queryset = queryset
