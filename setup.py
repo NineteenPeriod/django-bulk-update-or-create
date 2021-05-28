@@ -2,5 +2,7 @@
 
 from setuptools import setup
 
-setup()
+setup(
+  name='django-bulk-update-or-create',
+)
 
